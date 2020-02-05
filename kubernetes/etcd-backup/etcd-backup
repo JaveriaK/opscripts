@@ -1,0 +1,21 @@
+#!/bin/bash
+
+DATE=$(date +"%Y-%m-%d")
+TIMESTAMP=`date "+%Y-%m-%d %H:%M:%S"`
+
+aws --version
+
+etcdctl ${ETCD_OPTS} cluster-health
+
+[[ $? -eq 0 ]] || { echo >&2 "Error! Cluster not healhty - Aborting"; exit 1; }
+
+echo "Saving backup snapshot ${TIMESTAMP}"
+cd ${ETCD_DATADIR}
+
+ETCDCTL_API=3 etcdctl snapshot save snapshotdb_${CLUSTER}_${DATE}
+
+aws s3 cp snapshotdb_${CLUSTER}_${DATE} s3://${BUCKET}/${CLUSTER}/
+
+rm snapshotdb_${CLUSTER}_${DATE}
+
+exit 0

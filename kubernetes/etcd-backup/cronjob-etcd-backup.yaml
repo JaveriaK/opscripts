@@ -1,0 +1,68 @@
+# Make sure you create a secret with the bucket credentials before 
+# applying to a new enviroment!! 
+#
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: etcd-backup
+  namespace: kube-system
+spec:
+  schedule: "0 0 * * *"
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      # Job timeout
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          tolerations:
+          - operator: Exists
+            effect: NoSchedule
+          # Container creates etcd backups.
+          # Run container in host network mode on K8s masters
+          # to be able to use 127.0.0.1 as etcd address.
+          # For etcd v2 backups container should have access
+          # to etcd data directory. To achieve that,
+          # mount /var/lib/etcd3 as a volume.
+          nodeSelector:
+            node-role.kubernetes.io/master: ""
+          containers:
+          - name: etcd-backup
+            image: jvkhan/etcd-backup:latest
+            volumeMounts:
+            - mountPath: /var/lib/etcd
+              name: etcd-datadir
+            - mountPath: /etc/kubernetes/
+              name: etcd-certs
+            env:
+              - name: AWS_ACCESS_KEY_ID
+                valueFrom:
+                  secretKeyRef:
+                    name: etcd-backup
+                    key: ETCDBACKUP_AWS_ACCESS_KEY
+              - name: AWS_SECRET_ACCESS_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: etcd-backup
+                    key: ETCDBACKUP_AWS_SECRET_KEY
+              - name: CLUSTER
+                value: "{{ cluster_name }}"
+              - name: BUCKET
+                value: "{{ etcd_backup_bucket | default("k8s-etcd-backups") }}"
+              - name: ETCD_DATADIR
+                value: "{{ etcd_datadir | default("/var/lib/etcd") }}"
+              - name: ETCD_OPTS
+                value: "--cert-file=/etc/kubernetes/kubernetes.pem --key-file=/etc/kubernetes/kubernetes-key.pem --ca-file=/etc/kubernetes/pki/ca.pem"
+          volumes:
+          - name: etcd-datadir
+            hostPath:
+              path: /var/lib/etcd
+          - name: etcd-certs
+            hostPath:
+              path: /etc/kubernetes/
+          # Do not restart pod, job takes care on restarting failed pod.
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: internalpull
+          hostNetwork: true
